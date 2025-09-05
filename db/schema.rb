@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_05_140259) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_05_153923) do
   create_table "companies", force: :cascade do |t|
     t.string "name"
     t.string "address"
@@ -19,18 +19,19 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_05_140259) do
     t.string "role"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.integer "production_id", null: false
+    t.integer "production_id"
     t.index ["production_id"], name: "index_companies_on_production_id"
   end
 
   create_table "credits", force: :cascade do |t|
-    t.string "role"
     t.integer "production_id", null: false
     t.integer "person_id", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "role_id"
     t.index ["person_id"], name: "index_credits_on_person_id"
     t.index ["production_id"], name: "index_credits_on_production_id"
+    t.index ["role_id"], name: "index_credits_on_role_id"
   end
 
   create_table "people", force: :cascade do |t|
@@ -50,7 +51,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_05_140259) do
     t.text "description"
   end
 
+  create_table "roles", force: :cascade do |t|
+    t.string "name", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_roles_on_name", unique: true
+  end
+
   add_foreign_key "companies", "productions"
   add_foreign_key "credits", "people"
   add_foreign_key "credits", "productions"
+  add_foreign_key "credits", "roles"
 end

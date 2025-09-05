@@ -1,3 +1,4 @@
+<!-- Version 1.0 -->
 <h1><%= @production.title %></h1>
 
 <p><strong>Production Type:</strong> <%= @production.production_type %></p>
@@ -10,8 +11,8 @@
 
 <h2>Credits</h2>
 <ul>
-  <% @production.credits.each do |credit| %>
-    <li><%= credit.role %>: <%= credit.person.name %></li>
+  <% @production.credits.group_by(&:role).each do |role, credits| %>
+    <li><strong><%= role %>:</strong> <%= credits.map { |c| c.person.name }.join(', ') %></li>
   <% end %>
 </ul>
 
