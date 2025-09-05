@@ -52,32 +52,35 @@ namespace :films do
 
       location_match = details.match(/LOCATION: ([^\n]+)/)
       location = location_match ? location_match[1].strip : nil
-      
-      # Now, let's extract companies and credits, and let the rest be the description
-      
-      # Find all companies and their positions
-      company_matches = details.enum_for(:scan, /([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/).map { Regexp.last_match }
-      
-      description_text = ''
-      companies_text = ''
-      
-      if company_matches.any?
-        # Get the end index of the last company entry
-        last_company_end_index = company_matches.last.end(0)
-        
-        # The description is the text after the last company entry
-        description_text = details[last_company_end_index..-1].strip
-        
-        # Everything before the description is companies and credits
-        companies_and_credits_text = details[0..last_company_end_index - 1]
-        
-        # Now, split the companies from the credits
-        companies_text = companies_and_credits_text
-      else
-        # If no companies are found, assume the entire `details` block is the description
-        description_text = details.strip
-      end
 
+      # Now, let's process the rest of the entry
+      remaining_text = details
+
+      # Extract credits and remove them from the remaining text
+      credits_data = {}
+      remaining_text.scan(/([A-Z\/]+): (.+?)(?=[A-Z\/]+: |\z)/m).each do |role, names|
+        credits_data[role.strip] = names.strip
+      end
+      credits_text = credits_data.map { |role, names| "#{role}: #{names}" }.join("\n")
+      remaining_text.gsub!(credits_text, '')
+
+      # Extract companies and remove them from the remaining text
+      companies_data = []
+      remaining_text.scan(/([A-Z\s,.]+)(\d{4,5}[^\s,]+)\s+([^\n]+)/).each do |match|
+        name, address, contact_info = match
+        companies_data << {
+          name: name.strip,
+          address: address.strip,
+          phones: contact_info.match(/\d{3}-\d{3}-\d{4}/).to_s,
+          emails: contact_info.match(/[\w.-]+@[\w.-]+/).to_s,
+        }
+      end
+      companies_text = companies_data.map { |c| "#{c[:name]} #{c[:address]} #{c[:phones]} #{c[:emails]}" }.join(' ')
+      remaining_text.gsub!(companies_text, '')
+      
+      # The description is what's left
+      description_text = remaining_text.strip
+      
       # Create the production
       production = Production.create!(
         title: title,
@@ -90,28 +93,19 @@ namespace :films do
       imported_productions += 1
       
       # Process companies
-      companies_text.scan(/([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/).each do |match|
-        name = match[0].strip
-        address = match[1].strip
-        contact_info = match[2].strip
-        
+      companies_data.each do |company_data|
         Company.create!(
-          name: name,
-          address: address,
-          phones: contact_info.match(/\d{3}-\d{3}-\d{4}/).to_s,
-          emails: contact_info.match(/[\w.-]+@[\w.-]+/).to_s,
+          name: company_data[:name],
+          address: company_data[:address],
+          phones: company_data[:phones],
+          emails: company_data[:emails],
           production: production
         )
         imported_companies += 1
       end
 
-      # Process credits from the remaining text
-      credits_text = details.gsub(description_text, '').gsub(companies_text, '')
-      credits_and_description = credits_text.split(/([A-Z\/]+: )/)
-      
-      credits_and_description.each_slice(2) do |role, names|
-        next unless role && names
-        role = role.strip.delete_suffix(':')
+      # Process credits
+      credits_data.each do |role, names|
         names.split('-').each do |name_part|
           name = name_part.strip
           if name.present?
