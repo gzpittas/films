@@ -41,18 +41,42 @@ namespace :films do
       production_type_match = first_line_after_title.match(/(Limited Series|Series|Feature Film)\s\/\s(.*)/i)
       if production_type_match
         production_type = production_type_match[1].strip
-        # This line is updated to strip the date and special character
         network = production_type_match[2].strip.gsub(/\s\d{2}-\d{2}-\d{2}ê?/, '')
       else
         production_type = nil
         network = nil
       end
 
-      status_match = details.match(/STATUS: ([^\n]+)/)
+      status_match = details.match(/STATUS: (.*?) LOCATION/)
       status = status_match ? status_match[1].strip : nil
 
       location_match = details.match(/LOCATION: ([^\n]+)/)
       location = location_match ? location_match[1].strip : nil
+      
+      # Now, let's extract companies and credits, and let the rest be the description
+      
+      # Find all companies and their positions
+      company_matches = details.enum_for(:scan, /([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/).map { Regexp.last_match }
+      
+      description_text = ''
+      companies_text = ''
+      
+      if company_matches.any?
+        # Get the end index of the last company entry
+        last_company_end_index = company_matches.last.end(0)
+        
+        # The description is the text after the last company entry
+        description_text = details[last_company_end_index..-1].strip
+        
+        # Everything before the description is companies and credits
+        companies_and_credits_text = details[0..last_company_end_index - 1]
+        
+        # Now, split the companies from the credits
+        companies_text = companies_and_credits_text
+      else
+        # If no companies are found, assume the entire `details` block is the description
+        description_text = details.strip
+      end
 
       # Create the production
       production = Production.create!(
@@ -60,13 +84,30 @@ namespace :films do
         production_type: production_type,
         network: network,
         status: status,
-        location: location
+        location: location,
+        description: description_text
       )
       imported_productions += 1
       
-      # Extract credits and description
-      credits_and_description = details.split(/([A-Z\/]+: )/)
-      description = credits_and_description.pop.strip
+      # Process companies
+      companies_text.scan(/([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/).each do |match|
+        name = match[0].strip
+        address = match[1].strip
+        contact_info = match[2].strip
+        
+        Company.create!(
+          name: name,
+          address: address,
+          phones: contact_info.match(/\d{3}-\d{3}-\d{4}/).to_s,
+          emails: contact_info.match(/[\w.-]+@[\w.-]+/).to_s,
+          production: production
+        )
+        imported_companies += 1
+      end
+
+      # Process credits from the remaining text
+      credits_text = details.gsub(description_text, '').gsub(companies_text, '')
+      credits_and_description = credits_text.split(/([A-Z\/]+: )/)
       
       credits_and_description.each_slice(2) do |role, names|
         next unless role && names
@@ -79,26 +120,6 @@ namespace :films do
             imported_people += 1
           end
         end
-      end
-      
-      # Set the description on the production
-      production.update!(description: description)
-      
-      # Extract companies
-      company_matches = details.scan(/([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/)
-      company_matches.each do |match|
-        name = match[0].strip
-        address = match[1].strip
-        contact_info = match[2].strip
-        
-        company = Company.create!(
-          name: name,
-          address: address,
-          phones: contact_info.match(/\d{3}-\d{3}-\d{4}/).to_s,
-          emails: contact_info.match(/[\w.-]+@[\w.-]+/).to_s,
-          production: production
-        )
-        imported_companies += 1
       end
     end
 
