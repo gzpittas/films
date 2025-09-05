@@ -1,3 +1,5 @@
+# Version 6.0
+
 # frozen_string_literal: true
 
 require 'pdf-reader'
@@ -12,7 +14,8 @@ namespace :films do
     Production.destroy_all
     Person.destroy_all
     Company.destroy_all
-    puts 'Cleared existing production, person, and company data.'
+    Role.destroy_all
+    puts 'Cleared existing production, person, company, and role data.'
 
     # Read the text from the PDF file
     pdf_text = PDF::Reader.new(Rails.root.join('app', 'assets', 'pdfs', 'production_weekly.pdf')).pages.map(&:text).join(' ')
@@ -22,51 +25,17 @@ namespace :films do
     imported_productions = 0
     imported_people = 0
     imported_companies = 0
+    imported_roles = 0
     
     # Process each entry
     production_entries.each do |entry|
       # Skip malformed or irrelevant entries
       next unless entry.include?('STATUS:') && !entry.include?('Production Weekly')
-      
-      # Extract the title first, as it's the most reliable marker
-      title_match = entry.match(/“([^”]+)”/)
-      title = title_match ? title_match[1].strip : 'Untitled'
 
-      # Split the entry into logical sections after the title
-      details_lines = entry.split("\n")
-      details = details_lines.drop(1).join("\n")
-
-      # Use regex to safely extract data from the first line after the title
-      first_line_after_title = details_lines.first.strip
-      production_type_match = first_line_after_title.match(/(Limited Series|Series|Feature Film)\s\/\s(.*)/i)
-      if production_type_match
-        production_type = production_type_match[1].strip
-        network = production_type_match[2].strip.gsub(/\s\d{2}-\d{2}-\d{2}ê?/, '')
-      else
-        production_type = nil
-        network = nil
-      end
-
-      status_match = details.match(/STATUS: (.*?) LOCATION/)
-      status = status_match ? status_match[1].strip : nil
-
-      location_match = details.match(/LOCATION: ([^\n]+)/)
-      location = location_match ? location_match[1].strip : nil
-
-      # Now, let's process the rest of the entry
-      remaining_text = details
-
-      # Extract credits and remove them from the remaining text
-      credits_data = {}
-      remaining_text.scan(/([A-Z\/]+): (.+?)(?=[A-Z\/]+: |\z)/m).each do |role, names|
-        credits_data[role.strip] = names.strip
-      end
-      credits_text = credits_data.map { |role, names| "#{role}: #{names}" }.join("\n")
-      remaining_text.gsub!(credits_text, '')
-
-      # Extract companies and remove them from the remaining text
+      # Use a robust regex to find and remove the companies first
       companies_data = []
-      remaining_text.scan(/([A-Z\s,.]+)(\d{4,5}[^\s,]+)\s+([^\n]+)/).each do |match|
+      companies_regex = /([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/
+      entry.scan(companies_regex).each do |match|
         name, address, contact_info = match
         companies_data << {
           name: name.strip,
@@ -75,13 +44,44 @@ namespace :films do
           emails: contact_info.match(/[\w.-]+@[\w.-]+/).to_s,
         }
       end
+      
+      # Use a robust regex to find and remove credits
+      credits_data = {}
+      credits_regex = /([A-Z\/]+): (.+?)(?=[A-Z\/]+: |\z)/m
+      entry.scan(credits_regex).each do |role, names|
+        credits_data[role.strip] = names.strip
+      end
+      
+      # The remaining text will contain the core details and description
+      remaining_text = entry.dup
+      
+      # Remove companies and credits text from the entry
       companies_text = companies_data.map { |c| "#{c[:name]} #{c[:address]} #{c[:phones]} #{c[:emails]}" }.join(' ')
+      credits_text = credits_data.map { |role, names| "#{role}: #{names}" }.join("\n")
+      
+      # Now, we extract core details from the entry without the credits and companies
       remaining_text.gsub!(companies_text, '')
+      remaining_text.gsub!(credits_text, '')
       
-      # The description is what's left
-      description_text = remaining_text.strip
+      # Extract the title first, as it's the most reliable marker
+      title_match = remaining_text.match(/“([^”]+)”/)
+      title = title_match ? title_match[1].strip : 'Untitled'
+
+      # The description is what's left after removing all structured data
+      description_text = remaining_text.gsub(title_match[0], '').strip
       
-      # Create the production
+      # Extract everything else from the remaining text
+      production_type_match = remaining_text.match(/(Limited Series|Series|Feature Film)\s\/\s(.*)/i)
+      production_type = production_type_match ? production_type_match[1].strip : nil
+      network = production_type_match ? production_type_match[2].strip.gsub(/\s\d{2}-\d{2}-\d{2}ê?/, '') : nil
+      
+      status_match = remaining_text.match(/STATUS: (.*?) LOCATION/)
+      status = status_match ? status_match[1].strip : nil
+
+      location_match = remaining_text.match(/LOCATION: ([^\n]+)/)
+      location = location_match ? location_match[1].strip : nil
+      
+      # Create the production record
       production = Production.create!(
         title: title,
         production_type: production_type,
@@ -105,8 +105,13 @@ namespace :films do
       end
 
       # Process credits
-      credits_data.each do |role, names|
-        names.split('-').each do |name_part|
+      credits_data.each do |role_name, names|
+        # Find or create the role record
+        role = Role.find_or_create_by!(name: role_name.strip)
+        imported_roles += 1 if role.persisted?
+
+        # Process each person and create a credit record
+        names.split(/ - | and /).each do |name_part|
           name = name_part.strip
           if name.present?
             person = Person.find_or_create_by!(name: name)
@@ -116,10 +121,11 @@ namespace :films do
         end
       end
     end
-
+    
     # Print a summary of the import
     puts "Successfully imported #{imported_productions} productions."
     puts "Successfully imported #{imported_people} unique people."
     puts "Successfully imported #{imported_companies} companies."
+    puts "Successfully imported #{imported_roles} unique roles."
   end
 end
