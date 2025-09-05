@@ -1,96 +1,110 @@
+# frozen_string_literal: true
+
 require 'pdf-reader'
+require 'byebug'
 
 namespace :films do
-  desc 'Processes the weekly production PDF and populates the database'
+  desc 'Processes weekly PDF and populates the database'
   task process_weekly_pdf: :environment do
-    pdf_path = Rails.root.join('app', 'assets', 'pdfs', 'production_weekly.pdf')
+    puts "Processing PDF file at: #{Rails.root.join('app', 'assets', 'pdfs', 'production_weekly.pdf')}"
 
-    unless File.exist?(pdf_path)
-      puts "Error: PDF file not found at #{pdf_path}"
-      puts "Please check the path and make sure the file exists."
-      return
-    end
-
-    puts "Processing PDF file at: #{pdf_path}"
-    puts "Cleared existing production, person, and company data."
-
+    # Clear existing data to prevent duplicates
     Production.destroy_all
     Person.destroy_all
     Company.destroy_all
+    puts 'Cleared existing production, person, and company data.'
 
-    reader = PDF::Reader.new(pdf_path)
-    full_text = reader.pages.map(&:text).join("\n")
-
-    # This regex now correctly identifies and splits each production entry.
-    # It uses a positive lookahead to split *before* each new title.
-    production_entries = full_text.split(/(?=“[^”]+?”)/m)
+    # Read the text from the PDF file
+    pdf_text = PDF::Reader.new(Rails.root.join('app', 'assets', 'pdfs', 'production_weekly.pdf')).pages.map(&:text).join(' ')
+    production_entries = pdf_text.split(/(?=“)/)
     
+    # Track imported counts for a final summary
+    imported_productions = 0
+    imported_people = 0
+    imported_companies = 0
+    
+    # Process each entry
     production_entries.each do |entry|
-      # Skip if the entry is empty or just header/footer text
-      next if entry.strip.empty? || entry.include?('Production Weekly')
+      # Skip malformed or irrelevant entries
+      next unless entry.include?('STATUS:') && !entry.include?('Production Weekly')
+      
+      # Extract the title first, as it's the most reliable marker
+      title_match = entry.match(/“([^”]+)”/)
+      title = title_match ? title_match[1].strip : 'Untitled'
 
-      # Use more specific regexes to pull out the details from each entry.
-      title_match = entry.match(/“([^”]+)”\s+(.*)/)
-      next unless title_match
-      
-      title_str, type_network_str = title_match[1], title_match[2]
-      
-      status_match = entry.match(/STATUS:\s*(.*?)(?=\n|$)/)
+      # Split the entry into logical sections after the title
+      details_lines = entry.split("\n")
+      details = details_lines.drop(1).join("\n")
+
+      # Use regex to safely extract data from the first line after the title
+      first_line_after_title = details_lines.first.strip
+      production_type_match = first_line_after_title.match(/(Limited Series|Series|Feature Film)\s\/\s(.*)/i)
+      if production_type_match
+        production_type = production_type_match[1].strip
+        # This line is updated to strip the date and special character
+        network = production_type_match[2].strip.gsub(/\s\d{2}-\d{2}-\d{2}ê?/, '')
+      else
+        production_type = nil
+        network = nil
+      end
+
+      status_match = details.match(/STATUS: ([^\n]+)/)
       status = status_match ? status_match[1].strip : nil
-      
-      location_match = entry.match(/LOCATION:\s*(.*?)(?=\n|$)/)
+
+      location_match = details.match(/LOCATION: ([^\n]+)/)
       location = location_match ? location_match[1].strip : nil
 
-      # The description is the text between the LOCATION and the first credit header
-      description_match = entry.match(/LOCATION:.*?[\r\n]+(.*?)(?=\n[A-Z\/]+:|\Z)/m)
-      description = description_match ? description_match[1].strip : nil
+      # Create the production
+      production = Production.create!(
+        title: title,
+        production_type: production_type,
+        network: network,
+        status: status,
+        location: location
+      )
+      imported_productions += 1
       
-      production_type, network = type_network_str.strip.split(/\s+\/\s+/, 2)
-
-      begin
-        production = Production.create!(
-          title: title_str.strip,
-          production_type: production_type&.strip,
-          network: network&.strip,
-          status: status,
-          location: location,
-          description: description
-        )
-      rescue ActiveRecord::RecordInvalid => e
-        puts "Error creating production for '#{title_str}': #{e.message}"
-        next
-      end
-
-      # Process credits by scanning for all credit headers
-      credit_regex = /(PRODUCER|WRITER\/PRODUCER|WRITER|DIRECTOR|LP|PM|PC|DP|1AD|CD):\s*(.*?)(?=\n[A-Z\/]+:|\Z)/m
+      # Extract credits and description
+      credits_and_description = details.split(/([A-Z\/]+: )/)
+      description = credits_and_description.pop.strip
       
-      entry.scan(credit_regex) do |match|
-        role_name = match[0].strip
-        names_str = match[1].strip.split(/, | - /).map(&:strip).reject(&:empty?)
-
-        names_str.each do |name|
-          person = Person.find_or_create_by!(name: name)
-          production.credits.create!(person: person, role: role_name)
+      credits_and_description.each_slice(2) do |role, names|
+        next unless role && names
+        role = role.strip.delete_suffix(':')
+        names.split('-').each do |name_part|
+          name = name_part.strip
+          if name.present?
+            person = Person.find_or_create_by!(name: name)
+            production.credits.create!(person: person, role: role)
+            imported_people += 1
+          end
         end
       end
-
-      # Process company information using a more flexible regex
-      company_regex = /([A-Z\s,]+)\n\s*([\w\s.,]+)\n\s*([\d\(\)\s\-\/]+\s+[\w@.\-\/]+)/m
-      entry.scan(company_regex).each do |match|
-        name, address, contact_info = match
+      
+      # Set the description on the production
+      production.update!(description: description)
+      
+      # Extract companies
+      company_matches = details.scan(/([A-Z\s,.]+)\s(\d{4,5}[^\s,]+)\s([^\n]+)/)
+      company_matches.each do |match|
+        name = match[0].strip
+        address = match[1].strip
+        contact_info = match[2].strip
         
-        production.companies.create!(
-          name: name.strip,
-          address: address.strip,
-          phones: contact_info.split(/\s+/)&.first,
-          emails: contact_info.split(/\s+/)&.last,
-          role: "Company"
+        company = Company.create!(
+          name: name,
+          address: address,
+          phones: contact_info.match(/\d{3}-\d{3}-\d{4}/).to_s,
+          emails: contact_info.match(/[\w.-]+@[\w.-]+/).to_s,
+          production: production
         )
+        imported_companies += 1
       end
     end
 
-    puts "Successfully imported #{Production.count} productions."
-    puts "Successfully imported #{Person.count} unique people."
-    puts "Successfully imported #{Company.count} companies."
+    # Print a summary of the import
+    puts "Successfully imported #{imported_productions} productions."
+    puts "Successfully imported #{imported_people} unique people."
+    puts "Successfully imported #{imported_companies} companies."
   end
 end
