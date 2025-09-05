@@ -1,0 +1,24 @@
+<h1>Production List</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Production Type</th>
+      <th>Network</th>
+      <th>Status</th>
+      <th>Location</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @productions.each do |production| %>
+      <tr>
+        <td><%= link_to production.title, production %></td>
+        <td><%= production.production_type %></td>
+        <td><%= production.network %></td>
+        <td><%= production.status %></td>
+        <td><%= production.location %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

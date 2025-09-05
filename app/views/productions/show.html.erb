@@ -1,0 +1,25 @@
+<h1><%= @production.title %></h1>
+
+<p><strong>Production Type:</strong> <%= @production.production_type %></p>
+<p><strong>Network:</strong> <%= @production.network %></p>
+<p><strong>Status:</strong> <%= @production.status %></p>
+<p><strong>Location:</strong> <%= @production.location %></p>
+
+<p><strong>Description:</strong></p>
+<p><%= @production.description %></p>
+
+<h2>Credits</h2>
+<ul>
+  <% @production.credits.each do |credit| %>
+    <li><%= credit.role %>: <%= credit.person.name %></li>
+  <% end %>
+</ul>
+
+<h2>Companies</h2>
+<ul>
+  <% @production.companies.each do |company| %>
+    <li><%= company.name %></li>
+  <% end %>
+</ul>
+
+<%= link_to 'Back to Productions', productions_path %>
