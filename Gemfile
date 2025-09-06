@@ -42,6 +42,7 @@ gem "thruster", require: false
 
 gem 'pdf-reader', '~> 2.15'
 gem 'byebug', '~> 12.0'
+gem 'csv'
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
