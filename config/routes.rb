@@ -1,7 +1,17 @@
+# config/routes.rb
 Rails.application.routes.draw do
-  # This single line creates all the standard routes for a production resource.
-  resources :productions
-
-  # Defines the root path route ("/")
-  root "productions#index"
+  root 'productions#index'
+  
+  resources :productions do
+    collection do
+      get :export_emails
+      get :export_phones
+    end
+  end
+  
+  resources :companies, only: [:index, :show]
+  resources :people, only: [:index, :show]
+  
+  # Health check
+  get "up" => "rails/health#show", as: :rails_health_check
 end

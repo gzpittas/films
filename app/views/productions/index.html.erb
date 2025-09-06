@@ -1,24 +1,238 @@
-<h1>Production List</h1>
+<!-- app/views/productions/index.html.erb -->
+<div class="container">
+  <h1>Production CRM</h1>
+  
+  <!-- Search Form -->
+  <%= form_with url: productions_path, method: :get, local: true do |form| %>
+    <div class="search-form">
+      <div class="form-row">
+        <%= form.label :title, "Title" %>
+        <%= form.text_field :title, value: params[:title], placeholder: "Search by title..." %>
+        
+        <%= form.label :status, "Status" %>
+        <%= form.text_field :status, value: params[:status], placeholder: "e.g. Active Development" %>
+        
+        <%= form.label :location, "Location" %>
+        <%= form.text_field :location, value: params[:location], placeholder: "e.g. Los Angeles" %>
+      </div>
+      
+      <div class="form-row">
+        <%= form.label :company, "Company" %>
+        <%= form.text_field :company, value: params[:company], placeholder: "Company name..." %>
+        
+        <%= form.label :person, "Person" %>
+        <%= form.text_field :person, value: params[:person], placeholder: "Person name..." %>
+        
+        <%= form.label :role, "Role" %>
+        <%= form.text_field :role, value: params[:role], placeholder: "e.g. Director" %>
+      </div>
+      
+      <div class="form-actions">
+        <%= form.submit "Search" %>
+        <%= link_to "Clear", productions_path %>
+        <% 
+          export_params = {}
+          [:title, :status, :location, :company, :person, :role].each do |param|
+            export_params[param] = params[param] if params[param].present?
+          end
+          export_params[:format] = :csv
+        %>
+        <%= link_to "Export CSV", productions_path(export_params) %>
+      </div>
+    </div>
+  <% end %>
+  
+  <!-- Results Summary -->
+  <div class="results-summary">
+    <p>Found <%= @productions.count %> productions</p>
+  </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>Title</th>
-      <th>Production Type</th>
-      <th>Network</th>
-      <th>Status</th>
-      <th>Location</th>
-    </tr>
-  </thead>
-  <tbody>
+  <!-- Productions List -->
+  <div class="productions-list">
     <% @productions.each do |production| %>
-      <tr>
-        <td><%= link_to production.title, production %></td>
-        <td><%= production.production_type %></td>
-        <td><%= production.network %></td>
-        <td><%= production.status %></td>
-        <td><%= production.location %></td>
-      </tr>
+      <div class="production-card">
+        <h2><%= link_to production.title, production_path(production) %></h2>
+        
+        <div class="production-details">
+          <% if production.production_type.present? %>
+            <span class="badge type"><%= production.production_type %></span>
+          <% end %>
+          
+          <% if production.network.present? %>
+            <span class="badge network"><%= production.network %></span>
+          <% end %>
+          
+          <% if production.status.present? %>
+            <span class="badge status"><%= production.status %></span>
+          <% end %>
+          
+          <% if production.location.present? %>
+            <span class="badge location"><%= production.location %></span>
+          <% end %>
+        </div>
+        
+        <div class="production-meta">
+          <span><%= production.companies.count %> companies</span>
+          <span><%= production.people.count %> people</span>
+          <span><%= production.all_emails.count %> emails</span>
+        </div>
+        
+        <% if production.description.present? %>
+          <p class="description"><%= truncate(production.description, length: 150) %></p>
+        <% end %>
+      </div>
     <% end %>
-  </tbody>
-</table>
+  </div>
+  
+  <% if @productions.empty? %>
+    <div class="no-results">
+      <p>No productions found.</p>
+      <% if params.values.none?(&:present?) %>
+        <p>Try importing some data first:</p>
+        <code>bundle exec rake import:simple_productions</code>
+      <% end %>
+    </div>
+  <% end %>
+</div>
+
+<style>
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.search-form {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.form-row {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.form-row > div {
+  flex: 1;
+  min-width: 200px;
+}
+
+.form-row label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.form-row input[type="text"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.form-actions input[type="submit"],
+.form-actions a {
+  padding: 10px 20px;
+  border-radius: 4px;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.form-actions input[type="submit"] {
+  background: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.form-actions a {
+  background: #6c757d;
+  color: white;
+}
+
+.results-summary {
+  margin-bottom: 20px;
+  padding: 10px;
+  background: #e9ecef;
+  border-radius: 4px;
+}
+
+.production-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  background: white;
+}
+
+.production-card h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.production-card h2 a {
+  color: #333;
+  text-decoration: none;
+}
+
+.production-card h2 a:hover {
+  color: #007bff;
+}
+
+.production-details {
+  margin-bottom: 10px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-right: 8px;
+  margin-bottom: 4px;
+}
+
+.badge.type { background: #007bff; color: white; }
+.badge.network { background: #28a745; color: white; }
+.badge.status { background: #ffc107; color: black; }
+.badge.location { background: #6f42c1; color: white; }
+
+.production-meta {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.production-meta span {
+  margin-right: 15px;
+}
+
+.description {
+  font-size: 14px;
+  line-height: 1.4;
+  color: #555;
+}
+
+.no-results {
+  text-align: center;
+  padding: 40px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.no-results code {
+  background: #e9ecef;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+</style>
