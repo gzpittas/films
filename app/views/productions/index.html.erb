@@ -1,242 +1,282 @@
-<div class="container">
-  <h1>Production CRM</h1>
-  
-  <!-- Search Form -->
-  <%= form_with url: productions_path, method: :get, local: true do |form| %>
-    <div class="search-form">
-      <div class="form-row">
-        <%= form.label :title, "Title" %>
-        <%= form.text_field :title, value: params[:title], placeholder: "Search by title..." %>
-        
-        <%= form.label :status, "Status" %>
-        <%= form.text_field :status, value: params[:status], placeholder: "e.g. Active Development" %>
-        
-        <%= form.label :location, "Location" %>
-        <%= form.text_field :location, value: params[:location], placeholder: "e.g. Los Angeles" %>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Productions Index</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f3f4f6;
+    }
+    .sortable-header {
+      cursor: pointer;
+      user-select: none;
+    }
+    .sort-icon {
+        transition: transform 0.2s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+  <div class="max-w-6xl w-full bg-white rounded-xl shadow-lg p-6">
+    
+    <header class="text-center mb-8">
+      <h1 class="text-4xl font-bold text-gray-800">Productions Dashboard</h1>
+      <p class="mt-2 text-gray-500">Find the latest films and series by location, status, and type.</p>
+    </header>
+
+    <div class="flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0 md:space-x-4 mb-8">
+      
+      <div class="relative w-full md:w-1/3">
+        <select id="location-filter" class="w-full pl-3 pr-10 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none transition duration-200 ease-in-out">
+          <option value="">All Locations</option>
+        </select>
+        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+          <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+          </svg>
+        </div>
       </div>
       
-      <div class="form-row">
-        <%= form.label :company, "Company" %>
-        <%= form.text_field :company, value: params[:company], placeholder: "Company name..." %>
-        
-        <%= form.label :person, "Person" %>
-        <%= form.text_field :person, value: params[:person], placeholder: "Person name..." %>
-        
-        <%= form.label :role, "Role" %>
-        <%= form.text_field :role, value: params[:role], placeholder: "e.g. Director" %>
+      <div class="relative w-full md:w-1/3">
+        <select id="status-filter" class="w-full pl-3 pr-10 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none transition duration-200 ease-in-out">
+          <option value="">All Statuses</option>
+        </select>
+        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+          <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+          </svg>
+        </div>
       </div>
       
-      <div class="form-actions">
-        <%= form.submit "Search", class: "btn btn-warning" %>
-        <%= link_to "Clear", productions_path, class: "btn btn-danger" %>
-        <% 
-          export_params = {}
-          [:title, :status, :location, :company, :person, :role].each do |param|
-            export_params[param] = params[param] if params[param].present?
-          end
-          export_params[:format] = :csv
-        %>
-        <%= link_to "Export CSV", productions_path(export_params) %>
+      <div class="relative w-full md:w-1/3">
+        <select id="type-filter" class="w-full pl-3 pr-10 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none transition duration-200 ease-in-out">
+          <option value="">All Types</option>
+        </select>
+        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+          <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+          </svg>
+        </div>
       </div>
+
     </div>
-  <% end %>
-  
-  <!-- Results Summary -->
-  <div class="results-summary">
-    <p>Found <%= @productions.count %> productions</p>
+
+    <div class="w-full overflow-x-auto">
+      <table id="productions-table" class="min-w-full divide-y divide-gray-200 rounded-lg shadow-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" data-sort-by="title">Title <span id="title-sort-icon" class="sort-icon"></span></th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" data-sort-by="location">Location <span id="location-sort-icon" class="sort-icon"></span></th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" data-sort-by="status">Status <span id="status-sort-icon" class="sort-icon"></span></th>
+            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" data-sort-by="type">Type <span id="type-sort-icon" class="sort-icon"></span></th>
+          </tr>
+        </thead>
+        <tbody id="productions-list" class="bg-white divide-y divide-gray-200">
+          <!-- Table rows will be dynamically inserted here -->
+        </tbody>
+      </table>
+    </div>
+
+    <div id="no-results" class="text-center text-gray-500 hidden mt-8">
+      <p class="text-lg font-medium">No productions match your criteria.</p>
+      <button onclick="resetFilters()" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg shadow hover:bg-blue-600 transition duration-200 ease-in-out">Reset Filters</button>
+    </div>
+    
+    <div id="loading" class="text-center text-gray-500 mt-8">
+      <p class="text-lg font-medium">Loading productions...</p>
+    </div>
+
   </div>
 
-  <!-- Productions List -->
-  <div class="productions-list">
-    <% @productions.each do |production| %>
-      <div class="production-card">
-        <h2><%= link_to production.title, production_path(production) %></h2>
+  <script>
+    let productions = [];
+    let currentSortColumn = 'title';
+    let currentSortDirection = 'asc';
+
+    const locationFilter = document.getElementById('location-filter');
+    const statusFilter = document.getElementById('status-filter');
+    const typeFilter = document.getElementById('type-filter');
+    const productionsList = document.getElementById('productions-list');
+    const productionsTable = document.getElementById('productions-table');
+    const noResultsMessage = document.getElementById('no-results');
+    const loadingMessage = document.getElementById('loading');
+    const sortableHeaders = document.querySelectorAll('.sortable-header');
+
+    // Fetch productions from the Rails backend
+    async function fetchProductions() {
+      loadingMessage.classList.remove('hidden');
+      productionsTable.classList.add('hidden');
+      try {
+        const response = await fetch(window.location.protocol + '//' + window.location.host + '/productions.json');
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        productions = await response.json();
         
-        <div class="production-details">
-          <% if production.production_type.present? %>
-            <span class="badge type"><%= production.production_type %></span>
-          <% end %>
-          
-          <% if production.network.present? %>
-            <span class="badge network"><%= production.network %></span>
-          <% end %>
-          
-          <% if production.status.present? %>
-            <span class="badge status"><%= production.status %></span>
-          <% end %>
-          
-          <% if production.location.present? %>
-            <span class="badge location"><%= production.location %></span>
-          <% end %>
+        loadingMessage.classList.add('hidden');
+        productionsTable.classList.remove('hidden');
 
-          <% if production.edition_number.present? %>
-            <span class="badge edition">#<%= production.edition_number %></span>
-          <% end %>
-        </div>
+        // Initial setup with the fetched data
+        populateFilters();
+        filterAndSortProductions();
+      } catch (error) {
+        console.error('There was a problem fetching the productions:', error);
+        loadingMessage.textContent = 'Failed to load productions.';
+      }
+    }
+
+    // Populate initial filter options
+    function populateFilters() {
+      const allLocations = [...new Set(productions.map(p => p.location))];
+      const allStatuses = [...new Set(productions.map(p => p.status))];
+      const allTypes = [...new Set(productions.map(p => p.type))];
+
+      populateDropdown(locationFilter, allLocations.sort());
+      populateDropdown(statusFilter, allStatuses.sort());
+      populateDropdown(typeFilter, allTypes.sort());
+    }
+
+    function populateDropdown(dropdown, items) {
+      dropdown.innerHTML = dropdown.options[0].outerHTML; // Keep the 'All' option
+      items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item;
+        option.textContent = item;
+        dropdown.appendChild(option);
+      });
+    }
+
+    // Render productions based on current filters and sort order
+    function renderProductions(filteredProductions) {
+      productionsList.innerHTML = '';
+      if (filteredProductions.length === 0) {
+        productionsTable.classList.add('hidden');
+        noResultsMessage.classList.remove('hidden');
+      } else {
+        productionsTable.classList.remove('hidden');
+        noResultsMessage.classList.add('hidden');
+        filteredProductions.forEach((production, index) => {
+          const row = document.createElement('tr');
+          row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-50'; // Stripe effect
+          row.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800">
+              <a href="/productions/${production.id}">${production.title}</a>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${production.location}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${production.status}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${production.type}</td>
+          `;
+          productionsList.appendChild(row);
+        });
+      }
+      updateSortIcons();
+    }
+
+    // Filter and sort productions based on selections and current sort order
+    function filterAndSortProductions() {
+      const selectedLocation = locationFilter.value;
+      const selectedStatus = statusFilter.value;
+      const selectedType = typeFilter.value;
+      
+      let filtered = productions.filter(p => {
+        const locationMatch = !selectedLocation || p.location === selectedLocation;
+        const statusMatch = !selectedStatus || p.status === selectedStatus;
+        const typeMatch = !selectedType || p.type === selectedType;
+        return locationMatch && statusMatch && typeMatch;
+      });
+      
+      // Apply sorting to the filtered list
+      filtered.sort((a, b) => {
+        const aValue = a[currentSortColumn] || '';
+        const bValue = b[currentSortColumn] || '';
+        if (aValue < bValue) return currentSortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return currentSortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+
+      renderProductions(filtered);
+      updateFilterOptions(selectedLocation, selectedStatus, selectedType);
+    }
+    
+    // Update other filter options based on current selections
+    function updateFilterOptions(selectedLocation, selectedStatus, selectedType) {
+        let dynamicLocations = productions;
+        let dynamicStatuses = productions;
+        let dynamicTypes = productions;
+
+        // Filter other options based on current selections
+        if (selectedStatus) {
+            dynamicLocations = dynamicLocations.filter(p => p.status === selectedStatus);
+            dynamicTypes = dynamicTypes.filter(p => p.status === selectedStatus);
+        }
+        if (selectedType) {
+            dynamicLocations = dynamicLocations.filter(p => p.type === selectedType);
+            dynamicStatuses = dynamicStatuses.filter(p => p.type === selectedType);
+        }
+        if (selectedLocation) {
+            dynamicStatuses = dynamicStatuses.filter(p => p.location === selectedLocation);
+            dynamicTypes = dynamicTypes.filter(p => p.location === selectedLocation);
+        }
         
-        <div class="production-meta">
-          <span><%= production.companies.count %> companies</span>
-          <span><%= production.people.count %> people</span>
-          <span><%= production.all_emails.count %> emails</span>
-        </div>
+        const validLocations = [...new Set(dynamicLocations.map(p => p.location))];
+        const validStatuses = [...new Set(dynamicStatuses.map(p => p.status))];
+        const validTypes = [...new Set(dynamicTypes.map(p => p.type))];
+
+        populateDropdown(locationFilter, validLocations.sort());
+        populateDropdown(statusFilter, validStatuses.sort());
+        populateDropdown(typeFilter, validTypes.sort());
         
-        <% if production.description.present? %>
-          <p class="description"><%= truncate(production.description, length: 150) %></p>
-        <% end %>
-      </div>
-    <% end %>
-  </div>
-  
-  <% if @productions.empty? %>
-    <div class="no-results">
-      <p>No productions found.</p>
-      <% if params.values.none?(&:present?) %>
-        <p>Try importing some data first:</p>
-        <code>bundle exec rake import:simple_productions</code>
-      <% end %>
-    </div>
-  <% end %>
-</div>
+        // Re-select the chosen values to prevent them from being reset
+        locationFilter.value = selectedLocation;
+        statusFilter.value = selectedStatus;
+        typeFilter.value = selectedType;
+    }
 
-<style>
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-}
+    // Reset all filters to their default state
+    function resetFilters() {
+      locationFilter.value = '';
+      statusFilter.value = '';
+      typeFilter.value = '';
+      populateFilters();
+      filterAndSortProductions();
+    }
+    
+    function updateSortIcons() {
+      document.querySelectorAll('.sort-icon').forEach(icon => icon.textContent = '');
+      const iconElement = document.getElementById(`${currentSortColumn}-sort-icon`);
+      if (iconElement) {
+        iconElement.textContent = currentSortDirection === 'asc' ? ' ▲' : ' ▼';
+      }
+    }
 
-.search-form {
-  background: #f8f9fa;
-  padding: 20px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
+    // Event Listeners for filters
+    locationFilter.addEventListener('change', filterAndSortProductions);
+    statusFilter.addEventListener('change', filterAndSortProductions);
+    typeFilter.addEventListener('change', filterAndSortProductions);
 
-.form-row {
-  display: flex;
-  gap: 15px;
-  margin-bottom: 15px;
-  flex-wrap: wrap;
-}
+    // Event Listener for sortable headers
+    sortableHeaders.forEach(header => {
+      header.addEventListener('click', () => {
+        const sortColumn = header.dataset.sortBy;
+        if (sortColumn === currentSortColumn) {
+          currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          currentSortColumn = sortColumn;
+          currentSortDirection = 'asc';
+        }
+        filterAndSortProductions();
+      });
+    });
 
-.form-row > div {
-  flex: 1;
-  min-width: 200px;
-}
 
-.form-row label {
-  display: block;
-  margin-bottom: 5px;
-  font-weight: bold;
-}
+    // Initial render
+    fetchProductions();
+  </script>
 
-.form-row input[type="text"] {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.form-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.form-actions input[type="submit"],
-.form-actions a {
-  padding: 10px 20px;
-  border-radius: 4px;
-  text-decoration: none;
-  display: inline-block;
-}
-
-.form-actions input[type="submit"] {
-  background: #007bff;
-  color: white;
-  border: none;
-  cursor: pointer;
-}
-
-.form-actions a {
-  background: #6c757d;
-  color: white;
-}
-
-.results-summary {
-  margin-bottom: 20px;
-  padding: 10px;
-  background: #e9ecef;
-  border-radius: 4px;
-}
-
-.production-card {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-  background: white;
-}
-
-.production-card h2 {
-  margin-top: 0;
-  margin-bottom: 10px;
-}
-
-.production-card h2 a {
-  color: #333;
-  text-decoration: none;
-}
-
-.production-card h2 a:hover {
-  color: #007bff;
-}
-
-.production-details {
-  margin-bottom: 10px;
-}
-
-.badge {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  margin-right: 8px;
-  margin-bottom: 4px;
-}
-
-.badge.type { background: #007bff; color: white; }
-.badge.network { background: #28a745; color: white; }
-.badge.status { background: #ffc107; color: black; }
-.badge.location { background: #6f42c1; color: white; }
-.badge.edition { background: #adb5bd; color: white; }
-
-.production-meta {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 10px;
-}
-
-.production-meta span {
-  margin-right: 15px;
-}
-
-.description {
-  font-size: 14px;
-  line-height: 1.4;
-  color: #555;
-}
-
-.no-results {
-  text-align: center;
-  padding: 40px;
-  background: #f8f9fa;
-  border-radius: 8px;
-}
-
-.no-results code {
-  background: #e9ecef;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-family: monospace;
-}
-</style>
+</body>
+</html>
