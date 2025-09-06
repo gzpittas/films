@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_05_163804) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_06_213657) do
   create_table "companies", force: :cascade do |t|
     t.string "name"
     t.string "address"
@@ -84,6 +84,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_05_163804) do
     t.string "production_type"
     t.string "network"
     t.text "description"
+    t.integer "edition_number"
     t.index ["status"], name: "index_productions_on_status"
     t.index ["title"], name: "index_productions_on_title"
   end

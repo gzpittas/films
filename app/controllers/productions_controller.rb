@@ -1,7 +1,6 @@
-# app/controllers/productions_controller.rb
 class ProductionsController < ApplicationController
   before_action :set_production, only: [:show]
-  before_action :set_filtered_productions, only: [:index, :export_emails, :export_phones]
+  before_action :set_filtered_productions, only: [:index, :export_emails, :export_phones, :export_csv]
 
   def index
     @productions = @productions.distinct.order(:title)
@@ -19,11 +18,35 @@ class ProductionsController < ApplicationController
   end
 
   def export_emails
-    send_data export_contacts(:emails, 'email'), filename: "email-list-#{Date.current}.csv"
+    send_data export_contacts(:emails), filename: "email-list-#{Date.current}.csv"
   end
 
   def export_phones
-    send_data export_contacts(:phones, 'phone'), filename: "phone-list-#{Date.current}.csv"
+    send_data export_contacts(:phones), filename: "phone-list-#{Date.current}.csv"
+  end
+
+  def export_csv
+    CSV.generate(headers: true) do |csv|
+      csv << [
+        'Title', 'Type', 'Network', 'Status', 'Location',
+        'Companies', 'People', 'Emails', 'Phones', 'Description'
+      ]
+      
+      @productions.each do |production|
+        csv << [
+          production.title,
+          production.production_type,
+          production.network,
+          production.status,
+          production.location,
+          production.companies.pluck(:name).join('; '),
+          production.people.pluck(:name).join('; '),
+          production.all_emails.join('; '),
+          production.all_phone_numbers.join('; '),
+          production.description
+        ]
+      end
+    end
   end
 
   private
@@ -51,51 +74,41 @@ class ProductionsController < ApplicationController
   end
 
   # Generic method to handle contact exports (emails and phones)
-  def export_contacts(contact_type, column_name)
+  def export_contacts(contact_type)
     CSV.generate(headers: true) do |csv|
-      csv << [column_name.capitalize, 'Production', 'Company/Person', 'Type']
+      csv << ['Contact', 'Production', 'Source Name', 'Source Type']
+      
       @productions.each do |production|
-        # Use metaprogramming to call the correct method and get contacts
-        contacts = production.send("all_#{contact_type}")
-        next if contacts.blank?
-
-        # Group contacts by company and person
-        production.companies.includes(contact_type).each do |company|
-          company.send(contact_type).each do |contact|
-            csv << [contact.send(column_name), production.title, company.name, 'Company']
+        # Check if production has companies
+        production.companies.each do |company|
+          if contact_type == :emails
+            company.email_addresses.each do |email|
+              csv << [email, production.title, company.name, 'Company']
+            end
+          else
+            company.phone_numbers.each do |phone|
+              csv << [phone, production.title, company.name, 'Company']
+            end
           end
         end
 
-        production.people.includes(contact_type).each do |person|
-          person.send(contact_type).each do |contact|
-            csv << [contact.send(column_name), production.title, person.name, 'Person']
+        # Check if production has people
+        production.people.each do |person|
+          if contact_type == :emails
+            person.email_addresses.each do |email|
+              csv << [email, production.title, person.name, 'Person']
+            end
+          else
+            person.phone_numbers.each do |phone|
+              csv << [phone, production.title, person.name, 'Person']
+            end
           end
         end
       end
     end
   end
 
-  def export_csv
-    CSV.generate(headers: true) do |csv|
-      csv << [
-        'Title', 'Type', 'Network', 'Status', 'Location',
-        'Companies', 'People', 'Emails', 'Phones', 'Description'
-      ]
-      
-      @productions.each do |production|
-        csv << [
-          production.title,
-          production.production_type,
-          production.network,
-          production.status,
-          production.location,
-          production.companies.pluck(:name).join('; '),
-          production.people.pluck(:name).join('; '),
-          production.all_emails.join('; '),
-          production.all_phone_numbers.join('; '),
-          production.description
-        ]
-      end
-    end
+  def production_params
+    params.require(:production).permit(:title, :status, :description, :location, :network, :production_type)
   end
 end
