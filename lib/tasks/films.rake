@@ -1,9 +1,9 @@
-# lib/tasks/import_productions.rake
+# lib/tasks/import_fixed.rake
 # frozen_string_literal: true
 
 namespace :import do
-  desc 'Imports productions from Production Weekly PDF into the database'
-  task productions: :environment do
+  desc 'Fixed import with correct quote detection'
+  task fixed_productions: :environment do
     require 'pdf-reader'
 
     text_file_path = Rails.root.join('db', 'data', 'production_weekly.pdf')
@@ -17,79 +17,249 @@ namespace :import do
     puts "Seeding common roles..."
     Role.seed_common_roles!
 
-    # Enhanced parser for Production Weekly format
-    class ProductionWeeklyParser
-      CompanyData = Struct.new(:name, :address, :phones, :emails, :role)
-      PersonData = Struct.new(:name, :role, :emails, :phones)
-
-      def self.extract_companies(block)
-        companies = []
-        lines = block.split("\n").map(&:strip).reject(&:empty?)
+    # Fixed parser that correctly identifies titles
+    class FixedPDFParser
+      def self.parse_pdf_content(file_content)
+        lines = file_content.split("\n").map(&:strip).reject(&:empty?)
         
-        current_company = nil
+        productions = []
+        current_production = nil
+        i = 0
         
-        lines.each_with_index do |line, i|
-          # Skip title lines and credit lines
-          next if line.match?(/^".*"/) || 
-                  line.match?(/STATUS:|LOCATION:|PRODUCER:|DIRECTOR:|WRITER:|CAST:|LP:|PM:|PC:|DP:|1AD:|CD:|SHOWRUNNER:/)
+        while i < lines.length
+          line = lines[i]
           
-          # Company name detection
-          if line.match?(/^[A-Z][A-Z\s&.,-]+(?:INC\.|LLC|LTD|COMPANY|PRODUCTIONS?|FILMS?|ENTERTAINMENT|STUDIOS?|MEDIA|PICTURES|CAPITAL|GROUP|AGENCY)?\.?\s*$/) ||
-             line.match?(/^[A-Z][A-Z\s&.,-]*(?:INC\.|LLC|LTD|COMPANY|PRODUCTIONS?|FILMS?|ENTERTAINMENT|STUDIOS?|MEDIA|PICTURES|CAPITAL|GROUP|AGENCY)/)
+          # Debug: check title line detection
+          if line.include?('"')
+            puts "Checking line: #{line[0..80]}..."
+            puts "  Starts with quote: #{line.strip.start_with?('"')}"
+            puts "  Contains production type: #{line.match?(/(Feature Film|Series|Telefilm|Limited Series|HBSVOD Feature)/i)}"
+            puts "  Is title line: #{is_title_line?(line)}"
+          end
+          
+          # Look for production titles - lines that start with quotes and contain "Feature Film", "Series", etc.
+          if is_title_line?(line)
+            # Save previous production if exists
+            productions << current_production if current_production && current_production[:title].present?
             
-            # Save previous company if it has contact info
-            save_company(companies, current_company) if current_company
+            # Start new production
+            current_production = parse_title_line(line)
+            current_production[:companies] = []
+            current_production[:people] = []
+            current_production[:content_lines] = []
             
-            # Start new company
-            current_company = {
-              name: clean_company_name(line),
-              address: "",
-              phones: [],
-              emails: [],
-              role: determine_company_role(line, i)
-            }
-          elsif current_company
-            # Extract contact information
-            emails = line.scan(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
-            current_company[:emails].concat(emails) if emails.any?
+            puts "Found production title: '#{current_production[:title]}'"
             
-            phones = line.scan(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)
-            phones += line.scan(/\+\d{2,3}\s\d{1,3}\s\d{3}\s\d{3}\s\d{3}/)
-            current_company[:phones].concat(phones) if phones.any?
+          elsif current_production
+            # Add line to current production's content for further processing
+            current_production[:content_lines] << line
             
-            # Capture address info
-            if !emails.any? && !phones.any? && line.match?(/\d+.*(?:St\.|Street|Ave\.|Avenue|Blvd\.|Boulevard|Dr\.|Drive|Suite|Ste\.|Floor|Road|Rd\.)/i)
-              current_company[:address] = line
+            # Parse specific information from each line
+            parse_production_line(line, current_production)
+          end
+          
+          i += 1
+        end
+        
+        # Don't forget the last production
+        productions << current_production if current_production && current_production[:title].present?
+        
+        # Process descriptions for each production
+        productions.each do |prod|
+          prod[:description] = extract_description(prod[:content_lines])
+        end
+        
+        productions
+      end
+      
+      def self.is_title_line?(line)
+        # A title line should:
+        # 1. Start with a quote
+        # 2. End with a quote followed by production type keywords
+        # 3. Not be part of a description (not too long and not containing common description words)
+        
+        return false unless line.start_with?('"')
+        return false if line.length > 100 # Too long to be a title line
+        return false if line.match?(/was.*years.*old|trying to|perfect|playground/) # Description keywords
+        
+        # Should contain production type keywords after the closing quote
+        line.match?(/"\s*(Feature Film|Series|Telefilm|Limited Series|HBSVOD Feature)/i)
+      end
+      
+      def self.parse_title_line(line)
+        # Extract title from quotes - handle concatenated titles
+        title_match = line.match(/^"([^"]+)"/)
+        title = title_match[1] if title_match
+        
+        if title
+          # Fix concatenated title by adding spaces
+          title = fix_concatenated_text(title)
+        end
+        
+        # Extract production type and network from remainder
+        remainder = line.sub(/^"[^"]+"/, '').strip
+        
+        production_type = nil
+        network = nil
+        
+        # Extract type
+        type_match = remainder.match(/(Feature Film|Series|Telefilm|Limited Series|HBSVOD Feature)/i)
+        production_type = type_match[1] if type_match
+        
+        # Extract network (after /)
+        network_match = remainder.match(/\/\s*([^\n]+)/)
+        network = network_match[1].strip if network_match
+        
+        {
+          title: title,
+          production_type: production_type,
+          network: network,
+          status: nil,
+          location: nil,
+          description: nil
+        }
+      end
+      
+      def self.fix_concatenated_text(text)
+        return text if text.blank?
+        
+        # Add spaces before capital letters that follow lowercase letters or numbers
+        fixed_text = text.gsub(/([a-z\d])([A-Z])/, '\1 \2')
+        
+        # Handle specific patterns
+        fixed_text = fixed_text.gsub(/(\d)(MILES|DAYS|YEARS)/i, '\1 \2')
+        
+        # Clean up multiple spaces
+        fixed_text.squeeze(' ').strip
+      end
+      
+      def self.parse_production_line(line, production)
+        # Status and Location
+        if line.match?(/STATUS:/)
+          status_match = line.match(/STATUS:\s*(.+?)(?:\s+LOCATION:|$)/)
+          production[:status] = status_match[1].strip if status_match
+          
+          location_match = line.match(/LOCATION:\s*(.+)/)
+          production[:location] = location_match[1].strip if location_match
+        end
+        
+        # Extract people information
+        extract_people_from_line(line, production)
+        
+        # Extract company information  
+        extract_companies_from_line(line, production)
+      end
+      
+      def self.extract_people_from_line(line, production)
+        # Producer
+        if line.match?(/PRODUCER:/)
+          producer_text = line[/PRODUCER:\s*(.+?)(?:WRITER|DIRECTOR|SHOWRUNNER|LP:|PM:|PC:|DP:|1AD:|CD:|$)/, 1]
+          if producer_text
+            names = split_concatenated_names(producer_text)
+            names.each do |name|
+              production[:people] << { name: name, role: 'Producer' }
             end
           end
         end
         
-        # Save final company
-        save_company(companies, current_company) if current_company
+        # Director
+        if line.match?(/DIRECTOR:/)
+          director_text = line[/(?:WRITER\/)?DIRECTOR:\s*(.+?)(?:\s+LP:|PM:|PC:|DP:|1AD:|CD:|$)/, 1]
+          if director_text
+            names = split_concatenated_names(director_text)
+            names.each do |name|
+              production[:people] << { name: name, role: 'Director' }
+            end
+          end
+        end
         
-        companies
-      end
-
-      def self.save_company(companies, company_data)
-        return unless company_data && company_data[:name].present?
-        return unless company_data[:emails].any? || company_data[:phones].any?
+        # Writer (can be WRITER/DIRECTOR)
+        if line.match?(/WRITER/)
+          writer_text = line[/WRITER[\/]?[A-Z]*:\s*(.+?)(?:DIRECTOR|LP:|PM:|PC:|DP:|1AD:|CD:|$)/, 1]
+          if writer_text && !writer_text.match?(/DIRECTOR/) # Avoid double-counting WRITER/DIRECTOR
+            names = split_concatenated_names(writer_text)
+            names.each do |name|
+              production[:people] << { name: name, role: 'Writer' }
+            end
+          end
+        end
         
-        companies << CompanyData.new(
-          company_data[:name],
-          company_data[:address],
-          company_data[:phones],
-          company_data[:emails],
-          company_data[:role]
-        )
+        # Other crew roles
+        roles_patterns = {
+          'Showrunner' => /SHOWRUNNER:\s*(.+?)(?:\s+DIRECTOR|LP:|PM:|PC:|DP:|1AD:|CD:|$)/,
+          'Line Producer' => /\bLP:\s*(.+?)(?:PM:|PC:|DP:|1AD:|CD:|$)/,
+          'Production Manager' => /\bPM:\s*(.+?)(?:PC:|DP:|1AD:|CD:|$)/,
+          'Production Coordinator' => /\bPC:\s*(.+?)(?:DP:|1AD:|CD:|$)/,
+          'Director of Photography' => /\bDP:\s*(.+?)(?:1AD:|CD:|$)/,
+          'First Assistant Director' => /\b1AD:\s*(.+?)(?:CD:|$)/,
+          'Casting Director' => /\bCD:\s*(.+?)$/
+        }
+        
+        roles_patterns.each do |role, pattern|
+          match = line.match(pattern)
+          if match && match[1].present?
+            names = split_concatenated_names(match[1])
+            names.each do |name|
+              production[:people] << { name: name, role: role }
+            end
+          end
+        end
       end
-
-      def self.clean_company_name(name)
-        name.strip.gsub(/\s+/, ' ')
+      
+      def self.extract_companies_from_line(line, production)
+        # Company names are usually all caps and contain company keywords
+        if line.match?(/^[A-Z][A-Z\s&.(),\-]*(?:PRODUCTIONS?|FILMS?|ENTERTAINMENT|STUDIOS?|MEDIA|PICTURES|COMPANY|CORPORATION|LLC|INC|GROUP|AGENCY|CAPITAL)/)
+          company_name = fix_concatenated_text(line.strip)
+          
+          # Extract emails from this line or nearby lines
+          emails = line.scan(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
+          
+          production[:companies] << {
+            name: company_name,
+            role: determine_company_role(company_name),
+            emails: emails,
+            phones: []
+          }
+        end
+        
+        # Phone/Fax lines
+        if line.match?(/PHONE:|FAX:/) && production[:companies].any?
+          phones = line.scan(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)
+          production[:companies].last[:phones].concat(phones) if phones.any?
+        end
+        
+        # Standalone email lines
+        emails = line.scan(/^\s*[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)
+        if emails.any? && production[:companies].any?
+          production[:companies].last[:emails].concat(emails)
+        end
       end
-
-      def self.determine_company_role(name, position)
+      
+      def self.split_concatenated_names(text)
+        return [] if text.blank?
+        
+        # Clean up common concatenations
+        clean_text = text.dup
+        
+        # Handle specific patterns like "CairoCannonWRITER" -> "Cairo Cannon"  
+        clean_text = clean_text.gsub(/(WRITER|DIRECTOR|PRODUCER|SHOWRUNNER)/i, '')
+        
+        # Add spaces before capital letters
+        clean_text = fix_concatenated_text(clean_text)
+        
+        # Split on likely boundaries (like " - " or multiple capitals)
+        names = clean_text.split(/\s*-\s*|\s*\/\s*/)
+        
+        # Clean and filter names
+        names.map(&:strip)
+             .reject(&:blank?)
+             .reject { |name| name.length < 3 }
+             .reject { |name| name.match?(/^(LP|PM|PC|DP|AD|CD)$/i) } # Remove role abbreviations
+      end
+      
+      def self.determine_company_role(name)
         case name.upcase
-        when /PRODUCTIONS?|PROD/
+        when /PRODUCTIONS?/
           'Production Company'
         when /STUDIOS?|PICTURES/
           'Studio'
@@ -98,236 +268,132 @@ namespace :import do
         when /NETFLIX|HBO|APPLE|AMAZON|PRIME|PEACOCK|HALLMARK/
           'Network'
         else
-          position < 3 ? 'Production Company' : 'Company'
+          'Company'
         end
       end
-
-      def self.extract_people(block)
-        people = []
+      
+      def self.extract_description(content_lines)
+        return nil if content_lines.blank?
         
-        # Extract different roles with regex
-        roles_patterns = {
-          'Director' => /DIRECTOR:\s*([^\n]+?)(?=\s+(?:LP|PM|PC|DP|1AD|CD|WRITER|CAST)|$)/,
-          'Writer' => /WRITER[\/]?[A-Z]*:\s*([^\n]+?)(?=\s+(?:DIRECTOR|LP|PM|PC|DP|1AD|CD|CAST)|$)/,
-          'Showrunner' => /SHOWRUNNER:\s*([^\n]+?)(?=\s+(?:DIRECTOR|LP|PM|PC|DP|1AD|CD|CAST)|$)/,
-          'Line Producer' => /\bLP[\/]?[A-Z]*:\s*([^\n]+?)(?=\s+(?:PM|PC|DP|1AD|CD)|$)/,
-          'Production Manager' => /\bPM:\s*([^\n]+?)(?=\s+(?:PC|DP|1AD|CD)|$)/,
-          'Production Coordinator' => /\bPC:\s*([^\n]+?)(?=\s+(?:DP|1AD|CD)|$)/,
-          'Director of Photography' => /\bDP:\s*([^\n]+?)(?=\s+(?:1AD|CD)|$)/,
-          'First Assistant Director' => /\b1AD:\s*([^\n]+?)(?=\s+(?:CD)|$)/,
-          'Casting Director' => /\bCD:\s*([^\n]+)/
-        }
-        
-        roles_patterns.each do |role, pattern|
-          match = block.match(pattern)
-          if match && match[1].present?
-            names = match[1].split(/\s*-\s*/).map(&:strip)
-            names.each do |name|
-              people << PersonData.new(name, role, [], []) if name.present?
-            end
-          end
+        # Look for long descriptive paragraphs
+        description_lines = content_lines.select do |line|
+          # Should be long enough to be descriptive
+          line.length > 50 &&
+          # Shouldn't contain technical/contact info
+          !line.match?(/STATUS:|LOCATION:|PRODUCER:|DIRECTOR:|WRITER:|CAST:|LP:|PM:|PC:|DP:|1AD:|CD:|PHONE:|FAX:|EMAIL:|@/) &&
+          # Shouldn't be a company name
+          !line.match?(/^[A-Z][A-Z\s&.(),\-]*(?:PRODUCTIONS?|FILMS?|ENTERTAINMENT|STUDIOS?|MEDIA|PICTURES|COMPANY|CORPORATION)/)
         end
         
-        # Extract producers
-        producer_match = block.match(/PRODUCER:\s*([^\n]+?)(?=\s+(?:WRITER|DIRECTOR|SHOWRUNNER)|$)/)
-        if producer_match && producer_match[1].present?
-          producers = producer_match[1].split(/\s*-\s*/).map(&:strip)
-          producers.each do |name|
-            people << PersonData.new(name, 'Producer', [], []) if name.present?
-          end
+        if description_lines.any?
+          # Join and clean up
+          description = description_lines.join(' ')
+          # Fix concatenated words in description
+          description = fix_concatenated_text(description)
+          description.strip
         end
-        
-        # Extract cast
-        cast_match = block.match(/CAST:\s*([^\n]+)/)
-        if cast_match && cast_match[1].present?
-          cast_members = cast_match[1].split(/\s*-\s*/).map(&:strip)
-          cast_members.each do |name|
-            people << PersonData.new(name, 'Actor', [], []) if name.present?
-          end
-        end
-        
-        people
-      end
-
-      def self.parse_production(block)
-        lines = block.split("\n").map(&:strip)
-        
-        # Extract title
-        title_line = lines.find { |line| line.match?(/^".*"/) }
-        title = nil
-        production_type = nil
-        network = nil
-        
-        if title_line
-          title = title_line[/"([^"]+)"/, 1]
-          remainder = title_line.sub(/"[^"]+"/, '').strip
-          
-          # Extract type
-          type_match = remainder.match(/(Feature Film|Series|Telefilm|HBSVOD Feature|Limited Series)/i)
-          production_type = type_match[1] if type_match
-          
-          # Extract network
-          network_match = remainder.match(/\/\s*([^\/\d]+)/)
-          network = network_match[1]&.strip if network_match
-        end
-
-        status = extract_field(block, /STATUS:\s*([^\n]+?)(?=\s+LOCATION:|$)/)
-        location = extract_field(block, /LOCATION:\s*([^\n]+)/)
-        description = extract_description(block)
-
-        {
-          title: title,
-          production_type: production_type,
-          network: network,
-          status: status,
-          location: location,
-          companies: extract_companies(block),
-          people: extract_people(block),
-          description: description
-        }
-      end
-
-      private
-
-      def self.extract_field(text, pattern)
-        match = text.match(pattern)
-        match&.captures&.first&.strip
-      end
-
-      def self.extract_description(block)
-        lines = block.split("\n").map(&:strip).reject(&:empty?)
-        
-        description_lines = []
-        found_description = false
-        
-        lines.reverse_each do |line|
-          # Skip company/contact/technical info
-          if line.match?(/^[A-Z][A-Z\s&.,-]+(?:INC\.|LLC|LTD|COMPANY|PRODUCTIONS?|FILMS?|ENTERTAINMENT|STUDIOS?|MEDIA|PICTURES)/) ||
-             line.match?(/PHONE:|FAX:|EMAIL:|@|STATUS:|LOCATION:|PRODUCER:|DIRECTOR:|WRITER:|CAST:|LP:|PM:|PC:|DP:|1AD:|CD:|SHOWRUNNER:/) ||
-             line.match?(/^\d+[-\s]\d+[-\s]\d+/) ||
-             line.match?(/^[""].*[""]/)
-            break if found_description
-            next
-          end
-          
-          if line.length > 50 && line.match?(/[.!?]$/)
-            description_lines.unshift(line)
-            found_description = true
-          elsif found_description
-            description_lines.unshift(line)
-          end
-        end
-        
-        description_lines.join(' ').strip if description_lines.any?
       end
     end
 
-    puts "Starting data import from '#{text_file_path}'..."
+    puts "Starting fixed data import from '#{text_file_path}'..."
     start_time = Time.now
     productions_imported = 0
     companies_created = 0
     people_created = 0
     errors = []
 
-    # Read PDF
+    # Read and parse PDF
     begin
       pdf_reader = PDF::Reader.new(text_file_path)
       file_content = pdf_reader.pages.map(&:text).join("\n")
       
-      # Clean content
-      file_content = file_content.gsub(/Production Weekly.*?Downloaded by.*?\n/m, '')
-      file_content = file_content.gsub(/© Copyright.*?\n/, '')
+      productions = FixedPDFParser.parse_pdf_content(file_content)
       
-      # Split into production blocks
-      production_blocks = file_content.scan(/(^"[^"]*".*?)(?=^"|$)/m)
-      
-      puts "Found #{production_blocks.length} potential production entries"
+      puts "Found #{productions.length} productions to import"
     rescue => e
       puts "Error reading PDF: #{e.message}"
       exit
     end
 
-    ActiveRecord::Base.transaction do
-      production_blocks.each_with_index do |block, index|
-        next if block.first.strip.empty?
+    # Clear existing data if needed
+    if ARGV.include?('--clear')
+      puts "Clearing existing data..."
+      Production.destroy_all
+      Company.destroy_all
+      Person.destroy_all
+    end
 
+    ActiveRecord::Base.transaction do
+      productions.each_with_index do |production_data, index|
         begin
-          parsed_data = ProductionWeeklyParser.parse_production(block.first)
-          
-          if parsed_data[:title].blank?
-            puts "Warning: Skipping entry #{index + 1} - no title found"
-            next
-          end
+          next if production_data[:title].blank?
 
           # Create or find production
-          production = Production.find_or_initialize_by(title: parsed_data[:title])
+          production = Production.find_or_initialize_by(title: production_data[:title])
           
-          is_new_production = production.new_record?
-          productions_imported += 1 if is_new_production
+          is_new = production.new_record?
+          productions_imported += 1 if is_new
           
           production.assign_attributes(
-            production_type: parsed_data[:production_type],
-            network: parsed_data[:network],
-            status: parsed_data[:status],
-            location: parsed_data[:location],
-            description: parsed_data[:description]
+            production_type: production_data[:production_type],
+            network: production_data[:network], 
+            status: production_data[:status],
+            location: production_data[:location],
+            description: production_data[:description]
           )
           
           production.save!
           
-          puts "#{is_new_production ? 'Created' : 'Updated'}: '#{production.title}'"
+          puts "#{is_new ? '✓ Created' : '↻ Updated'}: '#{production.title}'"
+          puts "  Type: #{production.production_type}" if production.production_type.present?
+          puts "  Network: #{production.network}" if production.network.present?
+          puts "  Status: #{production.status}" if production.status.present?
+          puts "  Location: #{production.location}" if production.location.present?
 
           # Process companies
-          parsed_data[:companies]&.each do |company_data|
-            next if company_data.name.blank?
+          production_data[:companies]&.each do |company_data|
+            next if company_data[:name].blank?
             
-            company = Company.find_or_initialize_by(name: company_data.name)
+            company = Company.find_or_initialize_by(name: company_data[:name])
             
             if company.new_record?
-              company.assign_attributes(
-                address: company_data.address,
-                role: company_data.role
-              )
+              company.role = company_data[:role]
               company.save!
               companies_created += 1
             end
 
-            # Link company to production
+            # Link to production
             ProductionCompany.find_or_create_by(
               production: production,
               company: company
             )
 
             # Add emails
-            company_data.emails&.each do |email|
-              next if email.blank?
+            company_data[:emails]&.each do |email|
               EmailAddress.find_or_create_by(
                 company: company,
                 email: email.downcase
               )
             end
-
+            
             # Add phones
-            company_data.phones&.each do |phone|
-              next if phone.blank?
+            company_data[:phones]&.each do |phone|
               PhoneNumber.find_or_create_by(
                 company: company,
-                number: phone.strip
+                number: phone
               )
             end
           end
 
           # Process people
-          parsed_data[:people]&.each do |person_data|
-            next if person_data.name.blank?
+          production_data[:people]&.each do |person_data|
+            next if person_data[:name].blank?
             
-            person = Person.find_or_create_by(name: person_data.name)
+            person = Person.find_or_create_by(name: person_data[:name])
             people_created += 1 if person.previously_new_record?
             
-            # Find or create role
-            role = Role.find_or_create_by(name: person_data.role)
+            role = Role.find_or_create_by(name: person_data[:role])
             
-            # Create credit (link person to production with role)
             Credit.find_or_create_by(
               production: production,
               person: person,
@@ -335,12 +401,8 @@ namespace :import do
             )
           end
 
-        rescue ActiveRecord::RecordInvalid => e
-          error_msg = "Validation failed for '#{parsed_data[:title] || 'Unknown'}': #{e.message}"
-          errors << error_msg
-          puts "✗ #{error_msg}"
         rescue => e
-          error_msg = "Unexpected error for entry #{index + 1}: #{e.message}"
+          error_msg = "Error importing '#{production_data[:title]}': #{e.message}"
           errors << error_msg
           puts "✗ #{error_msg}"
         end
@@ -351,27 +413,26 @@ namespace :import do
     duration = end_time - start_time
     
     puts "\n" + "="*60
-    puts "IMPORT SUMMARY"
+    puts "FIXED IMPORT SUMMARY"
     puts "="*60
-    puts "✓ Productions imported/updated: #{productions_imported}"
-    puts "✓ Companies created: #{companies_created}"
-    puts "✓ People created: #{people_created}"
+    puts "✓ Productions: #{productions_imported}"
+    puts "✓ Companies: #{companies_created}" 
+    puts "✓ People: #{people_created}"
     puts "✗ Errors: #{errors.length}"
-    puts "⏱  Total time: #{format('%.2f', duration)} seconds"
+    puts "⏱  Time: #{format('%.2f', duration)} seconds"
     
     if errors.any?
-      puts "\nErrors encountered:"
+      puts "\nErrors:"
       errors.each_with_index do |error, i|
         puts "#{i + 1}. #{error}"
       end
     end
     
-    puts "\n🎬 Import complete!"
-    puts "📊 Database now contains:"
+    puts "\n📊 Final database totals:"
     puts "   - #{Production.count} productions"
     puts "   - #{Company.count} companies"  
     puts "   - #{Person.count} people"
-    puts "   - #{EmailAddress.count} email addresses"
-    puts "   - #{PhoneNumber.count} phone numbers"
+    puts "   - #{EmailAddress.count} emails"
+    puts "   - #{PhoneNumber.count} phones"
   end
 end
