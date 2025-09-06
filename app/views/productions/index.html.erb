@@ -27,8 +27,8 @@
       </div>
       
       <div class="form-actions">
-        <%= form.submit "Search" %>
-        <%= link_to "Clear", productions_path %>
+        <%= form.submit "Search", class: "btn btn-warning" %>
+        <%= link_to "Clear", productions_path, class: "btn btn-danger" %>
         <% 
           export_params = {}
           [:title, :status, :location, :company, :person, :role].each do |param|
